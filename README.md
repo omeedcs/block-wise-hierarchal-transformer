@@ -90,7 +90,7 @@ The Transformer model is composed of several modular classes:
 ### Running the Code
 1. **Train the Model**:
    - The script trains the model on the provided `raw_conversations` for 200 epochs.
-   - Run the script directly: `python script.py`.
+   - Run the script directly: `python transformer_and_train.py`.
    - Model weights are saved to `chat_transformer.pth`.
 
 2. **Evaluate Perplexity**:
