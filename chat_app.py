@@ -45,12 +45,12 @@ def load_model(checkpoint_path=None):
     """
     # Create model - use parameters matching our training
     model = HierarchicalTransformer(
-        vocab_size=len(word_to_id),
+        vocab_size=2000,  # Match the checkpoint's vocabulary size
         d_model=256,
         d_ff=1024,
         n_heads=8,
         block_size=8,
-        n_local_layers=3,
+        n_local_layers=2,  # Match the checkpoint's layer count
         n_global_layers=2
     )
     
@@ -66,9 +66,16 @@ def load_model(checkpoint_path=None):
                 device = torch.device("cpu")
                 
             # Load the checkpoint
-            state_dict = torch.load(checkpoint_path, map_location=device)
-            model.load_state_dict(state_dict)
-            print(f"Model loaded from {checkpoint_path}")
+            checkpoint = torch.load(checkpoint_path, map_location=device)
+            # Check if the checkpoint contains a model_state_dict key (from enhanced training)
+            if 'model_state_dict' in checkpoint:
+                model.load_state_dict(checkpoint['model_state_dict'])
+                print(f"Model loaded from {checkpoint_path} (epoch: {checkpoint.get('epoch', 'unknown')})")
+                print(f"Perplexity: {checkpoint.get('perplexity', 'unknown')}")
+            else:
+                # Direct state dict format
+                model.load_state_dict(checkpoint)
+                print(f"Model loaded from {checkpoint_path}")
         except Exception as e:
             print(f"Failed to load model from {checkpoint_path}: {e}")
             print("Initializing new model instead")
@@ -86,9 +93,16 @@ def load_model(checkpoint_path=None):
                     device = torch.device("cpu")
                     
                 # Load the checkpoint
-                state_dict = torch.load(default_path, map_location=device)
-                model.load_state_dict(state_dict)
-                print(f"Model loaded from {default_path}")
+                checkpoint = torch.load(default_path, map_location=device)
+                # Check if the checkpoint contains a model_state_dict key (from enhanced training)
+                if 'model_state_dict' in checkpoint:
+                    model.load_state_dict(checkpoint['model_state_dict'])
+                    print(f"Model loaded from {default_path} (epoch: {checkpoint.get('epoch', 'unknown')})")
+                    print(f"Perplexity: {checkpoint.get('perplexity', 'unknown')}")
+                else:
+                    # Direct state dict format
+                    model.load_state_dict(checkpoint)
+                    print(f"Model loaded from {default_path}")
             except Exception as e:
                 print(f"Failed to load model: {e}")
                 print("Initializing new model instead")
@@ -124,10 +138,10 @@ def create_web_interface(model, device):
                 message, 
                 word_to_id, 
                 device, 
-                max_length=50, 
-                temperature=0.8, 
-                top_k=40,
-                repetition_penalty=1.2
+                max_length=40, 
+                temperature=0.7, 
+                top_k=30,
+                repetition_penalty=1.5
             )
             
             # Calculate the time taken to generate response
@@ -185,9 +199,14 @@ def create_cli_interface(model, device):
         # Generate response
         start_time = time.time()
         response = generate_response(
-            user_input, model, word_to_id, id_to_word,
-            max_length=50, top_k=10, temperature=0.8,
-            device=device
+            model, 
+            user_input, 
+            word_to_id, 
+            device,
+            max_length=40, 
+            temperature=0.7, 
+            top_k=30,
+            repetition_penalty=1.5
         )
         end_time = time.time()
         

@@ -39,10 +39,11 @@ from hiearchal_transformer import (
     EOS_TOKEN_ID,
     SEP_TOKEN_ID,
     PAD_TOKEN_ID,
+    UNK_TOKEN_ID,
     ChatDataset,
     collate_fn,
     VOCAB_SIZE,
-    load_or_create_vocab,
+    tokenizer,
     tokenize
 )
 
@@ -239,7 +240,7 @@ def train_model_enhanced(
     return losses, perplexities
 
 def load_or_create_synthetic_data(
-    templates_count=1000, 
+    templates_count=1500, 
     output_file="enhanced_conversations.json",
     force_regenerate=False
 ):
@@ -287,6 +288,7 @@ def main(args):
     logger = logging.getLogger("EnhancedTraining")
     
     # Load or create enhanced dataset
+    logger.info(f"Generating {args.templates} synthetic conversations")
     conversations = load_or_create_synthetic_data(
         templates_count=args.templates,
         output_file=args.output_file,
@@ -307,19 +309,20 @@ def main(args):
         EOS_TOKEN_ID,
         SEP_TOKEN_ID,
         PAD_TOKEN_ID,
+        UNK_TOKEN_ID,
         ChatDataset,
         collate_fn,
         VOCAB_SIZE,
-        load_or_create_vocab,
+        tokenizer,
         tokenize
     )
     
-    # Ensure vocabulary is large enough
+    # Ensure vocabulary is adequate
     if args.vocab_size > VOCAB_SIZE:
-        logger.info(f"Expanding vocabulary from {VOCAB_SIZE} to {args.vocab_size} words")
-        load_or_create_vocab(min_vocab_size=args.vocab_size)
+        logger.info(f"Note: Requested vocabulary size {args.vocab_size} is larger than current BPE vocabulary ({VOCAB_SIZE})")
+        logger.info("BPE tokenizer vocabulary is fixed after training. No expansion needed.")
     else:
-        logger.info(f"Using existing vocabulary with {VOCAB_SIZE} words")
+        logger.info(f"Using existing BPE vocabulary with {VOCAB_SIZE} tokens")
     
     # Process conversations - properly tokenize them
     tokenized_conversations = []
@@ -336,8 +339,8 @@ def main(args):
             response_turn = conversation[i + 1]
             
             # Tokenize the turns
-            input_tokens = tokenize(input_turn)
-            response_tokens = tokenize(response_turn)
+            input_tokens = tokenize(input_turn, tokenizer)
+            response_tokens = tokenize(response_turn, tokenizer)
             
             # Combine with special tokens
             combined = [SOS_TOKEN_ID] + input_tokens + [SEP_TOKEN_ID] + response_tokens + [EOS_TOKEN_ID]
@@ -460,7 +463,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Enhanced training for Hierarchical Transformer")
     
     # Data parameters
-    parser.add_argument("--templates", type=int, default=1000, help="Number of synthetic conversation templates to generate")
+    parser.add_argument("--templates", type=int, default=1500, help="Number of synthetic conversation templates to generate")
     parser.add_argument("--force_regen", action="store_true", help="Force regeneration of data even if it exists")
     parser.add_argument("--output_file", type=str, default="enhanced_conversations.json", help="Output file for synthetic data")
     

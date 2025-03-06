@@ -285,14 +285,29 @@ class SyntheticDataSource(DataSource):
         
         # Common placeholders for templates
         self.placeholders = {
-            "{name}": ["Alice", "Bob", "Charlie", "David", "Emma", "Frank", "Grace", "Hannah"],
-            "{color}": ["red", "blue", "green", "yellow", "orange", "purple", "pink", "black"],
-            "{food}": ["pizza", "pasta", "burger", "salad", "sushi", "tacos", "sandwich", "cake"],
-            "{animal}": ["dog", "cat", "elephant", "lion", "tiger", "giraffe", "monkey", "bear"],
-            "{number}": ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine"],
+            "{name}": ["Alice", "Bob", "Charlie", "David", "Emma", "Frank", "Grace", "Hannah", 
+                      "Ian", "Julia", "Kevin", "Laura", "Michael", "Natalie", "Oliver", "Patricia"],
+            "{color}": ["red", "blue", "green", "yellow", "orange", "purple", "pink", "black",
+                       "white", "brown", "gray", "turquoise", "violet", "indigo", "maroon", "teal"],
+            "{food}": ["pizza", "pasta", "burger", "salad", "sushi", "tacos", "sandwich", "cake",
+                      "ice cream", "chocolate", "steak", "curry", "soup", "noodles", "fruit", "vegetables"],
+            "{animal}": ["dog", "cat", "elephant", "lion", "tiger", "giraffe", "monkey", "bear",
+                        "dolphin", "eagle", "wolf", "fox", "panda", "koala", "penguin", "snake"],
+            "{number}": ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", 
+                        "eleven", "twelve", "fifteen", "twenty", "thirty", "fifty", "hundred"],
             "{day}": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
-            "{city}": ["New York", "London", "Tokyo", "Paris", "Berlin", "Sydney", "Rome", "Cairo"],
-            "{country}": ["USA", "UK", "Japan", "France", "Germany", "Australia", "Italy", "Egypt"],
+            "{city}": ["New York", "London", "Tokyo", "Paris", "Berlin", "Sydney", "Rome", "Cairo",
+                      "Beijing", "Moscow", "Dubai", "Singapore", "Toronto", "Rio", "Mumbai", "Hong Kong"],
+            "{country}": ["USA", "UK", "Japan", "France", "Germany", "Australia", "Italy", "Egypt",
+                         "China", "Russia", "Canada", "Brazil", "India", "Mexico", "South Korea", "Spain"],
+            "{emotion}": ["happy", "sad", "excited", "anxious", "proud", "disappointed", "confused", "surprised",
+                         "grateful", "hopeful", "curious", "relaxed", "frustrated", "amused", "inspired", "calm"],
+            "{hobby}": ["reading", "painting", "gardening", "cooking", "photography", "hiking", "dancing", "gaming",
+                       "swimming", "writing", "cycling", "singing", "meditation", "yoga", "coding", "traveling"],
+            "{season}": ["spring", "summer", "autumn", "winter"],
+            "{weather}": ["sunny", "rainy", "cloudy", "snowy", "windy", "foggy", "stormy", "clear"],
+            "{topic}": ["politics", "science", "art", "music", "history", "technology", "sports", "education",
+                       "environment", "health", "philosophy", "literature", "economics", "psychology", "space"],
         }
     
     def name(self) -> str:
@@ -438,28 +453,57 @@ def get_conversation_templates() -> List[Tuple[str, str]]:
         ("hi", "hello, how can I help you today?"),
         ("good morning", "good morning! How are you today?"),
         ("how are you", "I'm doing well, thank you for asking! How about you?"),
+        ("hey there", "hello! Nice to meet you. How can I assist you?"),
+        ("greetings", "greetings! I'm here to help with whatever you need."),
         
         # Questions
         ("what is your name", "my name is Assistant, nice to meet you!"),
         ("how old are you", "I exist as a language model, so I don't have an age in the traditional sense."),
         ("what can you do", "I can chat with you, answer questions, help with tasks, and more!"),
         ("tell me about yourself", "I'm an AI assistant designed to be helpful, harmless, and honest."),
+        ("who created you", "I was created by a team of engineers and researchers in AI."),
+        ("where are you from", "I exist in the digital realm, so I don't have a physical origin location."),
         
         # Template-based
         ("what is your favorite {color}", "I like all colors, but {color} is particularly nice!"),
         ("do you like {food}", "Yes, {food} is delicious! Do you enjoy it too?"),
         ("have you been to {city}", "I haven't been to {city}, but I've heard it's a wonderful place!"),
         ("tell me about {animal}s", "{animal}s are fascinating creatures with unique characteristics."),
+        ("what's your favorite {hobby}", "I find {hobby} to be a fascinating activity that many people enjoy!"),
+        ("do you prefer {season} or {season}", "Both {season} and {season} have their unique charms!"),
+        ("are you feeling {emotion} today", "I don't experience emotions like humans do, but I appreciate you asking!"),
         
         # Instructions
         ("how do I make {food}", "To make {food}, you'll need ingredients and follow specific steps..."),
         ("what's the weather in {city}", "I don't have real-time weather data for {city}, but you can check online."),
         ("how many {animal}s are there in the world", "There are many {animal}s in the world, though exact numbers vary."),
+        ("how can I learn {hobby}", "Learning {hobby} takes practice. Start with basics and be consistent."),
+        ("directions to {city}", "I can't provide real-time directions, but there are great navigation apps available."),
+        ("tips for {hobby} in {weather} weather", "When {hobby} in {weather} conditions, it's important to prepare properly."),
         
         # Opinions/Preferences
         ("what do you think about {topic}", "That's an interesting question about {topic}. There are multiple perspectives..."),
         ("is {food} healthy", "{food} can be part of a balanced diet, depending on how it's prepared."),
         ("which is better, {color} or {color}", "Both colors have their unique appeal, it's really a matter of personal preference!"),
+        ("your thoughts on {topic} in {country}", "{topic} in {country} has its own unique aspects worth exploring."),
+        ("should I try {hobby}", "{hobby} can be very rewarding! It's great for personal development."),
+        ("is {city} a good place to live", "{city} has its own unique culture and lifestyle that many people appreciate."),
+        
+        # Technical
+        ("how does a transformer model work", "Transformer models use self-attention mechanisms to process sequential data in parallel."),
+        ("explain machine learning", "Machine learning is a field where computers learn patterns from data without explicit programming."),
+        ("what is a neural network", "Neural networks are computing systems inspired by biological neural networks in brains."),
+        ("explain tokenization", "Tokenization is the process of breaking text into smaller units like words or subwords."),
+        ("what is perplexity", "Perplexity is a measurement of how well a probability model predicts a sample, often used in NLP."),
+        ("difference between CNN and RNN", "CNNs are designed for spatial data like images, while RNNs handle sequential data like text."),
+        
+        # Problem-solving
+        ("I'm feeling {emotion}", "I understand you're feeling {emotion}. Would you like to talk about it?"),
+        ("I need help with {topic}", "I'd be happy to help with {topic}. What specific assistance do you need?"),
+        ("I can't decide between {color} and {color}", "When choosing between {color} and {color}, consider how each makes you feel."),
+        ("what should I do in {city}", "There are many attractions in {city}! Consider visiting popular landmarks or local spots."),
+        ("I'm struggling with {hobby}", "Many people find {hobby} challenging at first. Persistence is key to improvement."),
+        ("recommendations for {food} in {city}", "{city} has several great places for {food}, though I can't provide specific current recommendations."),
     ]
 
 # Example usage

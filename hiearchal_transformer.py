@@ -9,6 +9,10 @@ import logging
 import math
 import os
 import random
+from collections import Counter, defaultdict
+import re
+import json
+from bpe_tokenizer import BPETokenizer, load_or_create_bpe_tokenizer
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -262,7 +266,7 @@ class PositionalEncoding(nn.Module):
 
 # HierarchicalTransformer class
 class HierarchicalTransformer(nn.Module):
-    def __init__(self, vocab_size, d_model, d_ff, n_heads, n_local_layers, n_global_layers, block_size):
+    def __init__(self, vocab_size, d_model=512, d_ff=2048, n_heads=8, n_local_layers=4, n_global_layers=2, block_size=8):
         super().__init__()
         self.d_model = d_model
         self.block_size = block_size
@@ -305,28 +309,19 @@ class HierarchicalTransformer(nn.Module):
         self._init_weights()
     
     def _init_weights(self):
-        # Initialize embeddings with small values
-        nn.init.normal_(self.token_embedding.weight, mean=0.0, std=0.02)
+        """Initialize model weights with improved initialization strategy"""
+        # Embedding initialization
+        nn.init.normal_(self.token_embedding.weight, mean=0, std=0.02)
         
-        # Initialize output layer with small values
-        nn.init.normal_(self.output_layer.weight, mean=0.0, std=0.02)
+        # Output layer initialization
+        nn.init.normal_(self.output_layer.weight, mean=0, std=0.02)
         nn.init.zeros_(self.output_layer.bias)
         
-        # Initialize all linear layers with Xavier uniform
-        for name, p in self.named_parameters():
-            if "linear" in name.lower() or "proj" in name.lower():
-                if p.dim() > 1:
-                    nn.init.xavier_uniform_(p, gain=1/math.sqrt(2))
-                else:
-                    nn.init.zeros_(p)
-            elif "bias" in name:
-                nn.init.zeros_(p)
-            elif "norm" in name and "weight" in name:
-                nn.init.ones_(p)
-            elif "norm" in name and "bias" in name:
-                nn.init.zeros_(p)
-            elif "weight" in name and p.dim() > 1:
-                nn.init.xavier_uniform_(p, gain=1/math.sqrt(2))
+        # Apply layernorm initialization
+        for module in self.modules():
+            if isinstance(module, nn.LayerNorm):
+                nn.init.ones_(module.weight)
+                nn.init.zeros_(module.bias)
     
     def make_attn_mask(self, x, pad_mask):
         batch, length, _ = x.shape
@@ -423,76 +418,142 @@ EOS_TOKEN = "<EOS>"
 SEP_TOKEN = "<SEP>"
 UNK_TOKEN = "<UNK>"  # Add unknown token
 
-# Load vocabulary from file or use default small vocab
-def load_or_create_vocab(vocab_file="vocab.txt", min_vocab_size=1000):
-    """Load vocabulary from file or create default if file doesn't exist"""
-    special_tokens = [PAD_TOKEN, SOS_TOKEN, EOS_TOKEN, SEP_TOKEN, UNK_TOKEN]
+def load_tokenizer_and_vocab(texts=None, vocab_size=2000, tokenizer_path="bpe_tokenizer.json"):
+    """Load or create BPE tokenizer and vocabulary mappings"""
+    special_tokens = {
+        'PAD': PAD_TOKEN,
+        'SOS': SOS_TOKEN,
+        'EOS': EOS_TOKEN,
+        'SEP': SEP_TOKEN,
+        'UNK': UNK_TOKEN
+    }
     
-    if os.path.exists(vocab_file):
-        print(f"Loading vocabulary from {vocab_file}")
-        with open(vocab_file, 'r', encoding='utf-8') as f:
-            words = [line.strip() for line in f if line.strip()]
-        # Ensure special tokens are at the beginning
-        for token in special_tokens:
-            if token in words:
-                words.remove(token)
-        vocab = special_tokens + words
-    else:
-        print(f"Using default small vocabulary")
-        # Default small vocabulary - will be expanded by data processing
-        vocab = special_tokens + [
-            "hello", "hi", "how", "are", "you", "good", "bye", "what", "is", "your", "name",
-            "nice", "to", "meet", "thanks", "see", "later", "today", "i", "am", "too", "omeed",
-            "doing", "well", "favorite", "color", "blue", "music", "enjoy", "weather", "sunny",
-            "old", "timeless", "joke", "chicken", "road", "side", "purpose", "assist", "chat",
-            "dream", "imagine", "food", "eat", "suggest", "recipes", "feeling", "helpful", "there",
-            "about", "great", "hear"
-        ]
+    # If no texts are provided, load from synthetic data or existing conversations
+    if texts is None:
+        try:
+            # Try to load from enhanced_conversations.json
+            if os.path.exists("enhanced_conversations.json"):
+                print("Loading texts from enhanced_conversations.json for tokenizer training")
+                with open("enhanced_conversations.json", "r") as f:
+                    conversations = json.load(f)
+                texts = []
+                # The file format is a list of conversations, where each conversation is a list of alternating messages
+                for conversation in conversations:
+                    if isinstance(conversation, list):
+                        for message in conversation:
+                            if isinstance(message, str):
+                                texts.append(message)
+            # If that doesn't exist, generate some synthetic data
+            else:
+                print("No existing conversation data found. Generating synthetic data for tokenizer training...")
+                # Import here to avoid circular imports
+                from data_loader import DataProcessor, SyntheticDataSource, get_conversation_templates
+                data_processor = DataProcessor()
+                templates = get_conversation_templates()
+                synthetic_source = SyntheticDataSource(templates, count=500)  # Generate 500 samples for tokenizer training
+                data_processor.add_source(synthetic_source)
+                conversations = data_processor.process_all_sources()
+                texts = []
+                for conv in conversations:
+                    for turn in conv:
+                        if isinstance(turn, dict) and "text" in turn:
+                            texts.append(turn["text"])
+                        elif isinstance(turn, str):
+                            texts.append(turn)
+                # Save for future use
+                with open("tokenizer_training_data.json", "w") as f:
+                    json.dump(conversations, f)
+        except Exception as e:
+            print(f"Error loading texts for tokenizer training: {e}")
+            raise ValueError(f"Failed to load or generate texts for tokenizer training: {e}")
+            
+        if not texts:
+            raise ValueError("No texts could be loaded for tokenizer training")
     
-    print(f"Vocabulary size: {len(vocab)} words")
+    # Load or create BPE tokenizer
+    tokenizer = load_or_create_bpe_tokenizer(
+        texts=texts, 
+        vocab_size=vocab_size,
+        save_path=tokenizer_path,
+        special_tokens=special_tokens
+    )
     
-    # If vocabulary is too small, expand it with common English words
-    if len(vocab) < min_vocab_size:
-        print(f"Expanding vocabulary to at least {min_vocab_size} words")
-        # Common English words to use if needed
-        common_words = [
-            # Basic words
-            "the", "be", "to", "of", "and", "a", "in", "that", "have", "I", "it", "for", "not", "on", "with", "he", "as", "you", "do", "at", "this", "but", "his", "by", "from", "they", "we", "say", "her", "she", "or", "an", "will", "my", "one", "all", "would", "there", "their", "what", "so", "up", "out", "if", "about", "who", "get", "which", "go", "me", "when", "make", "can", "like", "time", "no", "just", "him", "know", "take", "people", "into", "year", "your", "good", "some", "could", "them", "see", "other", "than", "then", "now", "look", "only", "come", "its", "over", "think", "also", "back", "after", "use", "two", "how", "our", "work", "first", "well", "way", "even", "new", "want", "because", "any", "these", "give", "day", "most", "us",
-            # Chat-relevant words
-            "hello", "hi", "hey", "greetings", "welcome", "bye", "goodbye", "thanks", "thank", "please", "help", "question", "answer", "information", "chat", "talk", "say", "ask", "tell", "explain", "understand", "know", "learn", "teach", "share", "discuss", "conversation", "message", "respond", "reply", "assist", "support", "guide", "advice", "suggestion", "opinion", "idea", "thought", "feeling", "emotion", "happy", "sad", "depressed", "miserable", "unhappy", "joyful", "cheerful", "blissful", "ecstatic", "angry", "furious", "enraged", "irritated", "annoyed", "frustrated", "disappointed", "surprised", "shocked", "amazed", "astonished", "impressed", "curious", "interested", "intrigued", "fascinated", "bored", "tired", "exhausted", "sleepy", "awake", "alert", "confused", "puzzled", "perplexed", "bewildered", "understood", "clear", "obvious", "evident", "proud", "ashamed", "guilty", "innocent", "jealous", "envious", "greedy", "generous", "kind", "cruel", "nice", "mean", "friendly", "hostile", "polite", "rude", "respectful", "disrespectful", "honest", "dishonest", "truthful", "deceitful", "loyal", "disloyal", "faithful", "unfaithful", "trustworthy", "unreliable", "dependable", "undependable", "confident", "insecure", "certain", "uncertain", "sure", "unsure", "determined", "hesitant", "decisive", "indecisive", "optimistic", "pessimistic", "hopeful", "hopeless", "positive", "negative", "neutral", "balanced", "biased", "prejudiced", "tolerant", "intolerant", "accepting", "judgmental", "critical", "complimentary", "flattering", "insulting", "offensive", "inoffensive", "sensitive", "insensitive", "thoughtful", "thoughtless", "considerate", "inconsiderate", "caring", "uncaring", "loving", "cold", "warm", "distant", "close", "intimate", "connected", "disconnected", "engaged", "disengaged", "involved", "uninvolved", "committed", "uncommitted", "devoted", "indifferent", "passionate", "apathetic"
-        ]
+    # Get token IDs for special tokens
+    PAD_TOKEN_ID = tokenizer.get_special_token_id('PAD')
+    SOS_TOKEN_ID = tokenizer.get_special_token_id('SOS')
+    EOS_TOKEN_ID = tokenizer.get_special_token_id('EOS')
+    SEP_TOKEN_ID = tokenizer.get_special_token_id('SEP')
+    UNK_TOKEN_ID = tokenizer.get_special_token_id('UNK')
+    
+    # Create word-to-id and id-to-word mappings
+    word_to_id = tokenizer.encoder
+    id_to_word = tokenizer.decoder
+    
+    # Create word-to-id and id-to-word mappings as string keys/values for backward compatibility
+    word_to_id_str = {str(k): v for k, v in word_to_id.items()}
+    id_to_word_str = {str(k): v for k, v in id_to_word.items()}
+    
+    vocab_size = len(tokenizer.encoder)
+    logger.info(f"Vocabulary size: {vocab_size} tokens")
+    
+    return tokenizer, word_to_id, id_to_word, vocab_size, {
+        'PAD_TOKEN_ID': PAD_TOKEN_ID,
+        'SOS_TOKEN_ID': SOS_TOKEN_ID,
+        'EOS_TOKEN_ID': EOS_TOKEN_ID,
+        'SEP_TOKEN_ID': SEP_TOKEN_ID,
+        'UNK_TOKEN_ID': UNK_TOKEN_ID
+    }
+
+# Tokenize text using BPE tokenizer
+def tokenize(text, tokenizer):
+    """Convert text string to token IDs using BPE tokenizer"""
+    return tokenizer.tokenize(text)
+
+# Detokenize token IDs
+def detokenize(token_ids, tokenizer):
+    """Convert token IDs to text string using BPE tokenizer"""
+    return tokenizer.detokenize(token_ids)
+
+# Tokenize a conversation
+def tokenize_conversation(conversation, tokenizer, special_token_ids):
+    """
+    Tokenize a conversation into training pairs
+    Returns list of (input_ids, target_ids) pairs
+    """
+    sos_token_id = special_token_ids['SOS_TOKEN_ID']
+    eos_token_id = special_token_ids['EOS_TOKEN_ID']
+    sep_token_id = special_token_ids['SEP_TOKEN_ID']
+    
+    results = []
+    for i in range(0, len(conversation)-1, 2):
+        user_turn = conversation[i]
+        assistant_turn = conversation[i+1] if i+1 < len(conversation) else ""
         
-        # Add words until we reach minimum size (avoiding duplicates)
-        for word in common_words:
-            if word not in vocab and len(vocab) < min_vocab_size:
-                vocab.append(word)
-    
-    print(f"Vocabulary size: {len(vocab)} words")
-    
-    # Save expanded vocabulary to file
-    if not os.path.exists(vocab_file):
-        with open(vocab_file, 'w', encoding='utf-8') as f:
-            for word in vocab:
-                f.write(f"{word}\n")
-        print(f"Saved vocabulary to {vocab_file}")
-    
-    return vocab
+        # Skip empty turns
+        if not user_turn or not assistant_turn:
+            continue
+            
+        # Tokenize user input and assistant response
+        user_ids = tokenizer.tokenize(user_turn.lower())
+        assistant_ids = tokenizer.tokenize(assistant_turn.lower())
+        
+        # Create training pair - format: [SOS] user [SEP] assistant [EOS]
+        input_ids = [sos_token_id] + user_ids + [sep_token_id]
+        target_ids = input_ids + assistant_ids + [eos_token_id]
+        
+        results.append((input_ids, target_ids))
+        
+    return results
 
-# Load or create vocabulary
-vocab = load_or_create_vocab(min_vocab_size=1000)
+# Load tokenizer and create vocab
+tokenizer, word_to_id, id_to_word, VOCAB_SIZE, special_token_ids = load_tokenizer_and_vocab()
 
-# Create word-to-id and id-to-word mappings
-word_to_id = {word: idx for idx, word in enumerate(vocab)}
-id_to_word = {idx: word for idx, word in enumerate(vocab)}
-UNK_TOKEN_ID = word_to_id[UNK_TOKEN]
-PAD_TOKEN_ID = word_to_id[PAD_TOKEN]
-SOS_TOKEN_ID = word_to_id[SOS_TOKEN]
-EOS_TOKEN_ID = word_to_id[EOS_TOKEN]
-SEP_TOKEN_ID = word_to_id[SEP_TOKEN]
-VOCAB_SIZE = len(vocab)
-
-# Device configuration
-device = torch.device("cpu")
+# Extract special token IDs for convenience
+PAD_TOKEN_ID = special_token_ids['PAD_TOKEN_ID']
+SOS_TOKEN_ID = special_token_ids['SOS_TOKEN_ID']
+EOS_TOKEN_ID = special_token_ids['EOS_TOKEN_ID']
+SEP_TOKEN_ID = special_token_ids['SEP_TOKEN_ID']
+UNK_TOKEN_ID = special_token_ids['UNK_TOKEN_ID']
 
 # Expanded training data
 raw_conversations = [
@@ -518,31 +579,13 @@ raw_conversations = [
     ["how are you feeling", "i am feeling helpful today"],
 ]
 
-def tokenize(text):
-    """Convert text string to token IDs"""
-    tokens = text.strip().lower().split()
-    # Use UNK token for words not in vocabulary
-    return [word_to_id.get(token, UNK_TOKEN_ID) for token in tokens]
-
-def detokenize(token_ids):
-    """Convert token IDs to text string"""
-    return " ".join([id_to_word.get(id_, UNK_TOKEN) for id_ in token_ids if id_ not in [PAD_TOKEN_ID, SOS_TOKEN_ID]])
-
-def tokenize_conversation(conversation, word_to_id, sos_token_id, eos_token_id, sep_token_id):
-    tokenized_pairs = []
-    for i in range(len(conversation) - 1):
-        input_tokens = [sos_token_id] + [word_to_id.get(token, eos_token_id) for token in conversation[i].split()] + [sep_token_id]
-        response_tokens = [word_to_id.get(token, eos_token_id) for token in conversation[i+1].split()] + [eos_token_id]
-        tokenized_pairs.append(input_tokens + response_tokens)
-    return tokenized_pairs
-
 conversations = []
 for conv in raw_conversations:
-    conversations.extend(tokenize_conversation(conv, word_to_id, SOS_TOKEN_ID, EOS_TOKEN_ID, SEP_TOKEN_ID))
+    conversations.extend(tokenize_conversation(conv, tokenizer, special_token_ids))
 
 # Dataset with padding to MAX_SEQ_LEN
 class ChatDataset(Dataset):
-    def __init__(self, conversations, max_seq_len=64, pad_token_id=PAD_TOKEN_ID):
+    def __init__(self, conversations, max_seq_len=64, pad_token_id=special_token_ids['PAD_TOKEN_ID']):
         self.conversations = conversations
         self.max_seq_len = max_seq_len
         self.pad_token_id = pad_token_id
@@ -559,7 +602,7 @@ class ChatDataset(Dataset):
         # Split into input and target (for training)
         # Find separator token position
         try:
-            sep_idx = seq.index(SEP_TOKEN_ID)
+            sep_idx = seq.index(special_token_ids['SEP_TOKEN_ID'])
         except ValueError:
             # If no separator, treat entire sequence as input
             sep_idx = len(seq) // 2
@@ -587,7 +630,7 @@ class ChatDataset(Dataset):
         )
 
 # Collate function for DataLoader
-def collate_fn(batch, pad_token_id=PAD_TOKEN_ID):
+def collate_fn(batch, pad_token_id=special_token_ids['PAD_TOKEN_ID']):
     # Separate input and target sequences
     input_seqs, target_seqs = zip(*batch)
     
@@ -678,30 +721,47 @@ DROPOUT_QKV = 0.1
 DROPOUT_EMB = 0.1
 WARMUP_STEPS = 100
 
-# Initialize model
-model = HierarchicalTransformer(
-    vocab_size=VOCAB_SIZE,
-    d_model=D_MODEL,
-    d_ff=D_FF,
-    n_heads=N_HEADS,
-    n_local_layers=N_LOCAL_LAYERS,
-    n_global_layers=N_GLOBAL_LAYERS,
-    block_size=BLOCK_SIZE,
-).to(device)
-
-# Use AdamW optimizer with weight decay and gradient clipping
-optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE, betas=(0.9, 0.98), eps=1e-9)
-
-dataset = ChatDataset(conversations)
-dataloader = DataLoader(
-    dataset,
-    batch_size=BATCH_SIZE,
-    shuffle=True,
-    collate_fn=collate_fn
-)
-
-# Main training loop
+# Initialize the model with default parameters
 if __name__ == "__main__":
+    # Determine device
+    device = torch.device("cuda" if torch.cuda.is_available() else 
+                         "mps" if torch.backends.mps.is_available() else 
+                         "cpu")
+    
+    # Create the model
+    model = HierarchicalTransformer(
+        vocab_size=VOCAB_SIZE,
+        d_model=D_MODEL,
+        d_ff=D_FF,
+        n_heads=N_HEADS,
+        n_local_layers=N_LOCAL_LAYERS,
+        n_global_layers=N_GLOBAL_LAYERS,
+        block_size=BLOCK_SIZE,
+    ).to(device)
+
+    # Use AdamW optimizer with weight decay and gradient clipping
+    optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE, betas=(0.9, 0.98), eps=1e-9)
+
+    # Create a simple dataset for demonstration
+    from data_loader import DataProcessor, SyntheticDataSource, get_conversation_templates
+    data_processor = DataProcessor()
+    templates = get_conversation_templates()
+    synthetic_source = SyntheticDataSource(templates, count=100)
+    data_processor.add_source(synthetic_source)
+    conversations = data_processor.process_all_sources()
+
+    dataset = ChatDataset(conversations)
+    dataloader = DataLoader(
+        dataset,
+        batch_size=BATCH_SIZE,
+        shuffle=True,
+        collate_fn=collate_fn
+    )
+
+    # Calculate initial perplexity
+    perplexity = calculate_perplexity(model, dataloader, special_token_ids['PAD_TOKEN_ID'])
+    print(f"Initial Perplexity: {perplexity:.4f}")
+
     print("Training model with default settings...")
     print("For advanced training options, use enhanced_training.py instead.")
     import sys
@@ -711,11 +771,28 @@ if __name__ == "__main__":
     command = [sys.executable, "enhanced_training.py"]
     subprocess.run(command)
 
+    print("\nTesting model with example conversations...")
+    test_inputs = [
+        "hello",
+        "what is the weather today",
+        "tell me a joke",
+        "how are you today"
+    ]
+    
+    for input_text in test_inputs:
+        response = generate_response(model, input_text, tokenizer, device)
+        print(f"User Input: {input_text}")
+        print(f"Model Response: {response}")
+        print("---")
+
 # Perplexity evaluation
 def calculate_perplexity(model, dataloader, pad_token_id):
     model.eval()
     total_loss = 0
     total_tokens = 0
+    # Get the device from the model
+    device = next(model.parameters()).device
+    
     with torch.no_grad():
         for input_tensor, target_tensor, pad_mask in dataloader:
             input_tensor = input_tensor.to(device)
@@ -735,23 +812,25 @@ def calculate_perplexity(model, dataloader, pad_token_id):
     perplexity = torch.exp(torch.tensor(total_loss / total_tokens))
     return perplexity.item()
 
-perplexity = calculate_perplexity(model, dataloader, PAD_TOKEN_ID)
-print(f"Final Perplexity: {perplexity:.4f}")
-
 # Evaluation function with top-k sampling and improved handling of repetitions
-def generate_response(model, input_text, vocab_dict, device, max_length=50, temperature=0.8, top_k=40, repetition_penalty=1.2):
+def generate_response(model, input_text, tokenizer, device, max_length=40, temperature=0.7, 
+                      top_k=30, repetition_penalty=1.5, use_beam_search=True, beam_width=3, 
+                      length_normalization_alpha=0.6):
     """
     Generate a response from the model given input text
     
     Args:
         model: The hierarchical transformer model
         input_text: Text input from user
-        vocab_dict: Dictionary mapping words to ids
+        tokenizer: BPE tokenizer
         device: Device to run generation on
         max_length: Maximum response length
         temperature: Temperature for sampling (higher = more random)
         top_k: Number of highest probability tokens to consider for sampling
         repetition_penalty: Penalty for repeating tokens (higher = less repetition)
+        use_beam_search: Whether to use beam search for generation
+        beam_width: Number of beams for beam search
+        length_normalization_alpha: Parameter for length normalization (0-1)
         
     Returns:
         Generated response text
@@ -759,78 +838,160 @@ def generate_response(model, input_text, vocab_dict, device, max_length=50, temp
     model.eval()  # Set model to evaluation mode
     
     # Tokenize the input text
-    input_tokens = []
-    for word in input_text.lower().split():
-        if word in vocab_dict:
-            input_tokens.append(vocab_dict[word])
-        else:
-            input_tokens.append(UNK_TOKEN_ID)  # Use UNK token for unknown words
+    input_ids = tokenize(input_text, tokenizer)
     
     # Add SOS token at the beginning
-    input_tokens = [SOS_TOKEN_ID] + input_tokens
+    input_ids = [special_token_ids['SOS_TOKEN_ID']] + input_ids
     
     # Convert to tensor and move to device
-    input_tensor = torch.tensor(input_tokens).unsqueeze(0).to(device)
+    input_tensor = torch.tensor(input_ids).unsqueeze(0).to(device)
     
     # Create pad mask (no padding in input)
     pad_mask = torch.ones_like(input_tensor).bool().to(device)
     
-    # Track generated token ids and scores
-    output_token_ids = []
-    
-    # Track repeating tokens to apply repetition penalty
-    token_counts = {}
-    
-    # Generate response token by token
-    with torch.no_grad():
+    if use_beam_search:
+        # Implement beam search 
+        sequences = [([special_token_ids['SOS_TOKEN_ID']] + input_ids, 0.0)]  # (sequence, score)
+        finalized_sequences = []
+        
         for _ in range(max_length):
-            # Get model output
-            logits = model(input_tensor, pad_mask)
+            all_candidates = []
             
-            # Consider only the prediction for the last token
-            next_token_logits = logits[0, -1, :].cpu()
-            
-            # Apply repetition penalty
-            for token_id in set(output_token_ids):
-                if token_id in token_counts:
-                    token_counts[token_id] += 1
-                else:
-                    token_counts[token_id] = 1
+            # Expand each candidate sequence
+            for seq, score in sequences:
+                if seq[-1] == special_token_ids['EOS_TOKEN_ID'] or seq[-1] == special_token_ids['SEP_TOKEN_ID']:  # Sequence already complete
+                    finalized_sequences.append((seq, score))
+                    continue
                 
-                # Apply exponential penalty based on frequency
-                penalty = repetition_penalty ** token_counts[token_id]
-                next_token_logits[token_id] /= penalty
-            
-            # Apply temperature
-            next_token_logits = next_token_logits / temperature
-            
-            # Apply top-k filtering
-            if top_k > 0:
-                top_k_values, top_k_indices = torch.topk(next_token_logits, top_k)
+                input_seq = torch.tensor(seq).unsqueeze(0).to(device)
+                pad_mask = torch.ones_like(input_seq).bool().to(device)
                 
-                # Create a mask for the top-k tokens
-                next_token_logits.fill_(-float('inf'))
-                next_token_logits.scatter_(0, top_k_indices, top_k_values)
+                with torch.no_grad():
+                    logits = model(input_seq, pad_mask)
+                    
+                next_token_logits = logits[0, -1, :].cpu()
+                
+                # Apply repetition penalty
+                for token_id in set(seq[len(input_ids):]):  # Only penalize tokens in the response
+                    count = seq.count(token_id)
+                    if count > 1:
+                        next_token_logits[token_id] /= (repetition_penalty ** count)
+                
+                # Apply temperature
+                next_token_logits = next_token_logits / temperature
+                
+                # Apply top-k filtering
+                if top_k > 0:
+                    top_k_values, top_k_indices = torch.topk(next_token_logits, top_k)
+                    next_token_logits.fill_(-float('inf'))
+                    next_token_logits.scatter_(0, top_k_indices, top_k_values)
+                
+                # Convert to probabilities
+                probs = F.softmax(next_token_logits, dim=0)
+                
+                # Get the top beam_width candidates
+                topk_probs, topk_indices = torch.topk(probs, beam_width)
+                
+                for i in range(beam_width):
+                    token_id = topk_indices[i].item()
+                    token_prob = topk_probs[i].item()
+                    
+                    # Create new sequence
+                    new_seq = seq + [token_id]
+                    
+                    # Apply length normalization to score
+                    # (len(new_seq) - len(input_ids)) is the length of just the response part
+                    response_len = len(new_seq) - len(input_ids)
+                    if length_normalization_alpha > 0 and response_len > 0:
+                        length_penalty = ((5 + response_len) / 6) ** length_normalization_alpha
+                    else:
+                        length_penalty = 1.0
+                    
+                    # Score is log probability
+                    new_score = score + math.log(token_prob) / length_penalty
+                    
+                    all_candidates.append((new_seq, new_score))
             
-            # Convert to probabilities
-            probs = F.softmax(next_token_logits, dim=0)
-            
-            # Sample from the distribution
-            next_token = torch.multinomial(probs, 1).item()
-            
-            # Break if we generate the SEP or END token
-            if next_token == SEP_TOKEN_ID or next_token == EOS_TOKEN_ID:
+            # Handle case where all sequences are finalized
+            if len(all_candidates) == 0:
                 break
                 
-            # Add the generated token to our output
-            output_token_ids.append(next_token)
+            # Sort candidates by score and select top beam_width
+            all_candidates.sort(key=lambda x: x[1], reverse=True)
+            sequences = all_candidates[:beam_width]
             
-            # Append the next token to the input for the next iteration
-            next_token_tensor = torch.tensor([[next_token]]).to(device)
-            input_tensor = torch.cat([input_tensor, next_token_tensor], dim=1)
-            
-            # Update pad mask
-            pad_mask = torch.cat([pad_mask, torch.ones_like(next_token_tensor).bool().to(device)], dim=1)
+            # If all beams have ended, break
+            if all(seq[-1] == special_token_ids['EOS_TOKEN_ID'] or seq[-1] == special_token_ids['SEP_TOKEN_ID'] for seq, _ in sequences):
+                finalized_sequences.extend(sequences)
+                break
+        
+        # Select sequence with highest score
+        if finalized_sequences:
+            finalized_sequences.sort(key=lambda x: x[1], reverse=True)
+            best_seq = finalized_sequences[0][0]
+        else:
+            best_seq = sequences[0][0]
+        
+        # Extract only the response part (after input tokens)
+        output_token_ids = best_seq[len(input_ids):]
+        
+        # Remove any EOS/SEP token at the end
+        if output_token_ids and (output_token_ids[-1] == special_token_ids['EOS_TOKEN_ID'] or output_token_ids[-1] == special_token_ids['SEP_TOKEN_ID']):
+            output_token_ids = output_token_ids[:-1]
+    else:
+        # Regular autoregressive generation (original implementation)
+        output_token_ids = []
+        token_counts = {}
+        
+        with torch.no_grad():
+            for _ in range(max_length):
+                # Get model output
+                logits = model(input_tensor, pad_mask)
+                
+                # Consider only the prediction for the last token
+                next_token_logits = logits[0, -1, :].cpu()
+                
+                # Apply repetition penalty
+                for token_id in set(output_token_ids):
+                    if token_id in token_counts:
+                        token_counts[token_id] += 1
+                    else:
+                        token_counts[token_id] = 1
+                    
+                    # Apply exponential penalty based on frequency
+                    penalty = repetition_penalty ** token_counts[token_id]
+                    next_token_logits[token_id] /= penalty
+                
+                # Apply temperature
+                next_token_logits = next_token_logits / temperature
+                
+                # Apply top-k filtering
+                if top_k > 0:
+                    top_k_values, top_k_indices = torch.topk(next_token_logits, top_k)
+                    
+                    # Create a mask for the top-k tokens
+                    next_token_logits.fill_(-float('inf'))
+                    next_token_logits.scatter_(0, top_k_indices, top_k_values)
+                
+                # Convert to probabilities
+                probs = F.softmax(next_token_logits, dim=0)
+                
+                # Sample from the distribution
+                next_token = torch.multinomial(probs, 1).item()
+                
+                # Break if we generate the SEP or END token
+                if next_token == special_token_ids['SEP_TOKEN_ID'] or next_token == special_token_ids['EOS_TOKEN_ID']:
+                    break
+                    
+                # Add the generated token to our output
+                output_token_ids.append(next_token)
+                
+                # Append the next token to the input for the next iteration
+                next_token_tensor = torch.tensor([[next_token]]).to(device)
+                input_tensor = torch.cat([input_tensor, next_token_tensor], dim=1)
+                
+                # Update pad mask
+                pad_mask = torch.cat([pad_mask, torch.ones_like(next_token_tensor).bool().to(device)], dim=1)
     
     # Convert token ids back to words
     output_words = []
@@ -840,25 +1001,26 @@ def generate_response(model, input_text, vocab_dict, device, max_length=50, temp
         else:
             output_words.append("<UNK>")  # Should not happen, but just in case
     
-    # Basic coherence check - at least 3 unique words and no excessive repetition
+    # Enhanced coherence check
     unique_words = set(output_words)
-    if len(unique_words) < 3 or any(output_words.count(word) > len(output_words) // 3 for word in unique_words):
+    
+    # Check various criteria for a good response
+    min_length = 4
+    min_unique_words = 4
+    max_repetition_ratio = 0.25  # No word should represent more than 25% of the response
+    
+    # Semantic checks
+    has_content_words = any(word not in ['the', 'a', 'an', 'is', 'are', 'was', 'were', 'to', 'of', 'in', 'on', 'at'] 
+                           for word in output_words)
+    
+    # Check if the response meets our criteria
+    if (len(output_words) < min_length or  # Minimum length check
+        len(unique_words) < min_unique_words or  # Minimum unique words
+        not has_content_words or  # Must have some content words
+        any(output_words.count(word) > len(output_words) * max_repetition_ratio for word in unique_words)):  # Repetition check
         return "I'm not sure how to respond to that. Could you rephrase your question?"
     
     # Join the words to create the response text
     response_text = " ".join(output_words)
     
     return response_text
-
-test_inputs = [
-    "hello how are you",
-    "hi what is your name",
-    "nice to meet you",
-    "how are you today"
-]
-
-for input_text in test_inputs:
-    response = generate_response(model, input_text, word_to_id, device)
-    print(f"User Input: {input_text}")
-    print(f"Model Response: {response}")
-    print("---")
