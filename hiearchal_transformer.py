@@ -630,7 +630,7 @@ perplexity = calculate_perplexity(model, dataloader, PAD_TOKEN_ID)
 print(f"Final Perplexity: {perplexity:.4f}")
 
 # Evaluation function with top-k sampling
-def generate_response(input_text, model, word_to_id, id_to_word, max_length=20, top_k=10, temperature=0.8):
+def generate_response(input_text, model, word_to_id, id_to_word, max_length=20, top_k=10, temperature=0.8, device=None):
     model.eval()
     tokens = input_text.lower().split()
     input_ids = [SOS_TOKEN_ID] + [word_to_id.get(t, EOS_TOKEN_ID) for t in tokens] + [SEP_TOKEN_ID]
@@ -641,8 +641,19 @@ def generate_response(input_text, model, word_to_id, id_to_word, max_length=20, 
         pad_len = model.block_size - remainder
         input_ids.extend([PAD_TOKEN_ID] * pad_len)
     
-    input_tensor = torch.tensor([input_ids], dtype=torch.long).to(device)
-    pad_mask = torch.zeros_like(input_tensor, dtype=torch.bool).unsqueeze(-1).to(device)
+    # Use the provided device or fall back to CPU if there's an issue
+    if device is None:
+        device = torch.device("cpu")
+    
+    try:
+        input_tensor = torch.tensor([input_ids], dtype=torch.long).to(device)
+        pad_mask = torch.zeros_like(input_tensor, dtype=torch.bool).unsqueeze(-1).to(device)
+    except Exception as e:
+        print(f"Error with device {device}, falling back to CPU: {e}")
+        device = torch.device("cpu")
+        input_tensor = torch.tensor([input_ids], dtype=torch.long).to(device)
+        pad_mask = torch.zeros_like(input_tensor, dtype=torch.bool).unsqueeze(-1).to(device)
+        
     pad_mask[0, :, 0] = (input_tensor[0] == PAD_TOKEN_ID)
 
     # Initialize output with just [SOS]
@@ -662,13 +673,25 @@ def generate_response(input_text, model, word_to_id, id_to_word, max_length=20, 
                 padding_length = model.block_size - remainder
                 current_ids.extend([PAD_TOKEN_ID] * padding_length)
             
-            input_tensor = torch.tensor([current_ids], dtype=torch.long).to(device)
-            pad_mask = torch.zeros_like(input_tensor, dtype=torch.bool).unsqueeze(-1).to(device)
-            pad_mask[0, :, 0] = (input_tensor[0] == PAD_TOKEN_ID)
-            
-            # Get model predictions
-            logits = model(input_tensor, pad_mask)
-            next_token_logits = logits[:, -1, :] / temperature
+            try:
+                input_tensor = torch.tensor([current_ids], dtype=torch.long).to(device)
+                pad_mask = torch.zeros_like(input_tensor, dtype=torch.bool).unsqueeze(-1).to(device)
+                pad_mask[0, :, 0] = (input_tensor[0] == PAD_TOKEN_ID)
+                
+                # Get model predictions
+                logits = model(input_tensor, pad_mask)
+                next_token_logits = logits[:, -1, :] / temperature
+            except Exception as e:
+                print(f"Error during generation, falling back to CPU: {e}")
+                device = torch.device("cpu")
+                model = model.to(device)
+                input_tensor = torch.tensor([current_ids], dtype=torch.long).to(device)
+                pad_mask = torch.zeros_like(input_tensor, dtype=torch.bool).unsqueeze(-1).to(device)
+                pad_mask[0, :, 0] = (input_tensor[0] == PAD_TOKEN_ID)
+                
+                # Retry with CPU
+                logits = model(input_tensor, pad_mask)
+                next_token_logits = logits[:, -1, :] / temperature
             
             # Apply repetition penalty
             for id_ in set(output_ids):

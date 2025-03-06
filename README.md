@@ -86,6 +86,29 @@ This implementation draws inspiration from several research directions:
 - **Scalability**: Better suited for longer sequences than standard transformers
 - **Hierarchical Understanding**: Natural for data with inherent hierarchical structure (like conversations or documents)
 
+## Hardware Compatibility
+
+The model is designed to run on multiple hardware backends:
+
+### CUDA GPUs
+- Full support for NVIDIA GPUs through PyTorch's CUDA backend
+- Automatically utilized if available on the system
+
+### Apple Silicon (MPS)
+- Support for Apple M-series chips through Metal Performance Shaders
+- Includes fallback mechanisms to handle MPS-specific limitations
+- Automatically falls back to CPU for operations with compatibility issues
+
+### CPU
+- Always available as a fallback option
+- Used when specialized hardware is not available or encounters errors
+
+### Automatic Device Selection
+The code automatically selects the best available device in this order:
+1. CUDA GPU (if available)
+2. Apple Silicon MPS (if available, with CPU fallback for problematic operations)
+3. CPU (as the universal fallback)
+
 ## Implementation Details
 
 ### Data Preprocessing
