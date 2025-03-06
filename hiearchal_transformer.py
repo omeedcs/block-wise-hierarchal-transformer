@@ -7,6 +7,8 @@ from torch.nn.utils.rnn import pad_sequence
 from einops import repeat, rearrange
 import logging
 import math
+import os
+import random
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -414,30 +416,83 @@ class HierarchicalTransformer(nn.Module):
         
         return logits  # [batch_size, orig_seq_len, vocab_size]
 
-# Device configuration
-device = torch.device("cpu")
-
 # Vocabulary and special tokens
 PAD_TOKEN = "<PAD>"
 SOS_TOKEN = ""
 EOS_TOKEN = "<EOS>"
 SEP_TOKEN = "<SEP>"
-vocab = [
-    PAD_TOKEN, SOS_TOKEN, EOS_TOKEN, SEP_TOKEN,
-    "hello", "hi", "how", "are", "you", "good", "bye", "what", "is", "your", "name",
-    "nice", "to", "meet", "thanks", "see", "later", "today", "i", "am", "too", "omeed",
-    "doing", "well", "favorite", "color", "blue", "music", "enjoy", "weather", "sunny",
-    "old", "timeless", "joke", "chicken", "road", "side", "purpose", "assist", "chat",
-    "dream", "imagine", "food", "eat", "suggest", "recipes", "feeling", "helpful", "there",
-    "about", "great", "hear"
-]
+UNK_TOKEN = "<UNK>"  # Add unknown token
+
+# Load vocabulary from file or use default small vocab
+def load_or_create_vocab(vocab_file="vocab.txt", min_vocab_size=1000):
+    """Load vocabulary from file or create default if file doesn't exist"""
+    special_tokens = [PAD_TOKEN, SOS_TOKEN, EOS_TOKEN, SEP_TOKEN, UNK_TOKEN]
+    
+    if os.path.exists(vocab_file):
+        print(f"Loading vocabulary from {vocab_file}")
+        with open(vocab_file, 'r', encoding='utf-8') as f:
+            words = [line.strip() for line in f if line.strip()]
+        # Ensure special tokens are at the beginning
+        for token in special_tokens:
+            if token in words:
+                words.remove(token)
+        vocab = special_tokens + words
+    else:
+        print(f"Using default small vocabulary")
+        # Default small vocabulary - will be expanded by data processing
+        vocab = special_tokens + [
+            "hello", "hi", "how", "are", "you", "good", "bye", "what", "is", "your", "name",
+            "nice", "to", "meet", "thanks", "see", "later", "today", "i", "am", "too", "omeed",
+            "doing", "well", "favorite", "color", "blue", "music", "enjoy", "weather", "sunny",
+            "old", "timeless", "joke", "chicken", "road", "side", "purpose", "assist", "chat",
+            "dream", "imagine", "food", "eat", "suggest", "recipes", "feeling", "helpful", "there",
+            "about", "great", "hear"
+        ]
+    
+    print(f"Vocabulary size: {len(vocab)} words")
+    
+    # If vocabulary is too small, expand it with common English words
+    if len(vocab) < min_vocab_size:
+        print(f"Expanding vocabulary to at least {min_vocab_size} words")
+        # Common English words to use if needed
+        common_words = [
+            # Basic words
+            "the", "be", "to", "of", "and", "a", "in", "that", "have", "I", "it", "for", "not", "on", "with", "he", "as", "you", "do", "at", "this", "but", "his", "by", "from", "they", "we", "say", "her", "she", "or", "an", "will", "my", "one", "all", "would", "there", "their", "what", "so", "up", "out", "if", "about", "who", "get", "which", "go", "me", "when", "make", "can", "like", "time", "no", "just", "him", "know", "take", "people", "into", "year", "your", "good", "some", "could", "them", "see", "other", "than", "then", "now", "look", "only", "come", "its", "over", "think", "also", "back", "after", "use", "two", "how", "our", "work", "first", "well", "way", "even", "new", "want", "because", "any", "these", "give", "day", "most", "us",
+            # Chat-relevant words
+            "hello", "hi", "hey", "greetings", "welcome", "bye", "goodbye", "thanks", "thank", "please", "help", "question", "answer", "information", "chat", "talk", "say", "ask", "tell", "explain", "understand", "know", "learn", "teach", "share", "discuss", "conversation", "message", "respond", "reply", "assist", "support", "guide", "advice", "suggestion", "opinion", "idea", "thought", "feeling", "emotion", "happy", "sad", "depressed", "miserable", "unhappy", "joyful", "cheerful", "blissful", "ecstatic", "angry", "furious", "enraged", "irritated", "annoyed", "frustrated", "disappointed", "surprised", "shocked", "amazed", "astonished", "impressed", "curious", "interested", "intrigued", "fascinated", "bored", "tired", "exhausted", "sleepy", "awake", "alert", "confused", "puzzled", "perplexed", "bewildered", "understood", "clear", "obvious", "evident", "proud", "ashamed", "guilty", "innocent", "jealous", "envious", "greedy", "generous", "kind", "cruel", "nice", "mean", "friendly", "hostile", "polite", "rude", "respectful", "disrespectful", "honest", "dishonest", "truthful", "deceitful", "loyal", "disloyal", "faithful", "unfaithful", "trustworthy", "unreliable", "dependable", "undependable", "confident", "insecure", "certain", "uncertain", "sure", "unsure", "determined", "hesitant", "decisive", "indecisive", "optimistic", "pessimistic", "hopeful", "hopeless", "positive", "negative", "neutral", "balanced", "biased", "prejudiced", "tolerant", "intolerant", "accepting", "judgmental", "critical", "complimentary", "flattering", "insulting", "offensive", "inoffensive", "sensitive", "insensitive", "thoughtful", "thoughtless", "considerate", "inconsiderate", "caring", "uncaring", "loving", "cold", "warm", "distant", "close", "intimate", "connected", "disconnected", "engaged", "disengaged", "involved", "uninvolved", "committed", "uncommitted", "devoted", "indifferent", "passionate", "apathetic"
+        ]
+        
+        # Add words until we reach minimum size (avoiding duplicates)
+        for word in common_words:
+            if word not in vocab and len(vocab) < min_vocab_size:
+                vocab.append(word)
+    
+    print(f"Vocabulary size: {len(vocab)} words")
+    
+    # Save expanded vocabulary to file
+    if not os.path.exists(vocab_file):
+        with open(vocab_file, 'w', encoding='utf-8') as f:
+            for word in vocab:
+                f.write(f"{word}\n")
+        print(f"Saved vocabulary to {vocab_file}")
+    
+    return vocab
+
+# Load or create vocabulary
+vocab = load_or_create_vocab(min_vocab_size=1000)
+
+# Create word-to-id and id-to-word mappings
 word_to_id = {word: idx for idx, word in enumerate(vocab)}
 id_to_word = {idx: word for idx, word in enumerate(vocab)}
+UNK_TOKEN_ID = word_to_id[UNK_TOKEN]
 PAD_TOKEN_ID = word_to_id[PAD_TOKEN]
 SOS_TOKEN_ID = word_to_id[SOS_TOKEN]
 EOS_TOKEN_ID = word_to_id[EOS_TOKEN]
 SEP_TOKEN_ID = word_to_id[SEP_TOKEN]
 VOCAB_SIZE = len(vocab)
+
+# Device configuration
+device = torch.device("cpu")
 
 # Expanded training data
 raw_conversations = [
@@ -463,6 +518,16 @@ raw_conversations = [
     ["how are you feeling", "i am feeling helpful today"],
 ]
 
+def tokenize(text):
+    """Convert text string to token IDs"""
+    tokens = text.strip().lower().split()
+    # Use UNK token for words not in vocabulary
+    return [word_to_id.get(token, UNK_TOKEN_ID) for token in tokens]
+
+def detokenize(token_ids):
+    """Convert token IDs to text string"""
+    return " ".join([id_to_word.get(id_, UNK_TOKEN) for id_ in token_ids if id_ not in [PAD_TOKEN_ID, SOS_TOKEN_ID]])
+
 def tokenize_conversation(conversation, word_to_id, sos_token_id, eos_token_id, sep_token_id):
     tokenized_pairs = []
     for i in range(len(conversation) - 1):
@@ -487,17 +552,53 @@ class ChatDataset(Dataset):
 
     def __getitem__(self, idx):
         seq = self.conversations[idx]
-        if len(seq) < self.max_seq_len:
-            seq = seq + [self.pad_token_id] * (self.max_seq_len - len(seq))
+        if not isinstance(seq, list):
+            # Handle case where conversation is not already a list
+            seq = list(seq)
+        
+        # Split into input and target (for training)
+        # Find separator token position
+        try:
+            sep_idx = seq.index(SEP_TOKEN_ID)
+        except ValueError:
+            # If no separator, treat entire sequence as input
+            sep_idx = len(seq) // 2
+        
+        # Input is everything up to and including SEP_TOKEN
+        input_seq = seq[:sep_idx+1]
+        # Target is everything after SEP_TOKEN
+        target_seq = seq[sep_idx+1:]
+        
+        # Pad sequences if needed
+        if len(input_seq) < self.max_seq_len:
+            input_seq = input_seq + [self.pad_token_id] * (self.max_seq_len - len(input_seq))
         else:
-            seq = seq[:self.max_seq_len]
-        return torch.tensor(seq, dtype=torch.long)
+            input_seq = input_seq[:self.max_seq_len]
+            
+        if len(target_seq) < self.max_seq_len:
+            target_seq = target_seq + [self.pad_token_id] * (self.max_seq_len - len(target_seq))
+        else:
+            target_seq = target_seq[:self.max_seq_len]
+        
+        # Return input, target sequences
+        return (
+            torch.tensor(input_seq, dtype=torch.long),
+            torch.tensor(target_seq, dtype=torch.long)
+        )
 
 # Collate function for DataLoader
-def collate_fn(batch):
-    sequences = torch.stack(batch)
-    pad_mask = (sequences == PAD_TOKEN_ID).unsqueeze(-1)
-    return sequences, pad_mask
+def collate_fn(batch, pad_token_id=PAD_TOKEN_ID):
+    # Separate input and target sequences
+    input_seqs, target_seqs = zip(*batch)
+    
+    # Stack into tensors
+    input_tensor = torch.stack(input_seqs)
+    target_tensor = torch.stack(target_seqs)
+    
+    # Create padding mask for inputs
+    pad_mask = (input_tensor == pad_token_id).unsqueeze(-1)
+    
+    return input_tensor, target_tensor, pad_mask
 
 # Training function
 def train_model(model, dataloader, num_epochs, optimizer, pad_token_id):
@@ -508,15 +609,15 @@ def train_model(model, dataloader, num_epochs, optimizer, pad_token_id):
         total_loss = 0
         num_batches = 0
         
-        for batch_idx, (tokens, pad_mask) in enumerate(dataloader):
+        for batch_idx, (input_tensor, target_tensor, pad_mask) in enumerate(dataloader):
             optimizer.zero_grad()
             
             # Forward pass
-            logits = model(tokens, pad_mask)  # [batch_size, seq_len, vocab_size]
+            logits = model(input_tensor, pad_mask)  # [batch_size, seq_len, vocab_size]
             
             # Ensure shapes match for loss calculation
             batch_size, seq_len, vocab_size = logits.shape
-            targets = tokens[:, :seq_len].contiguous()
+            targets = target_tensor[:, :seq_len].contiguous()
             
             # Calculate loss
             loss = criterion(logits.view(-1, vocab_size), targets.view(-1))
@@ -524,7 +625,7 @@ def train_model(model, dataloader, num_epochs, optimizer, pad_token_id):
             # Check for NaN loss
             if torch.isnan(loss) or torch.isinf(loss):
                 print(f"NaN/Inf loss detected at epoch {epoch}, batch {batch_idx}")
-                print(f"Logits shape: {logits.shape}, Tokens shape: {tokens.shape}")
+                print(f"Logits shape: {logits.shape}, Targets shape: {target_tensor.shape}")
                 print(f"Logits min/max: {logits.min().item()}, {logits.max().item()}")
                 print(f"Logits mean/std: {logits.mean().item()}, {logits.std().item()}")
                 return
@@ -599,9 +700,16 @@ dataloader = DataLoader(
     collate_fn=collate_fn
 )
 
-# Train
-train_model(model, dataloader, NUM_EPOCHS, optimizer, PAD_TOKEN_ID)
-torch.save(model.state_dict(), "hierarchical_chat_transformer.pth")
+# Main training loop
+if __name__ == "__main__":
+    print("Training model with default settings...")
+    print("For advanced training options, use enhanced_training.py instead.")
+    import sys
+    import subprocess
+    
+    # Forward to enhanced training with default parameters
+    command = [sys.executable, "enhanced_training.py"]
+    subprocess.run(command)
 
 # Perplexity evaluation
 def calculate_perplexity(model, dataloader, pad_token_id):
@@ -609,11 +717,12 @@ def calculate_perplexity(model, dataloader, pad_token_id):
     total_loss = 0
     total_tokens = 0
     with torch.no_grad():
-        for tokens, pad_mask in dataloader:
-            tokens = tokens.to(device)
+        for input_tensor, target_tensor, pad_mask in dataloader:
+            input_tensor = input_tensor.to(device)
+            target_tensor = target_tensor.to(device)
             pad_mask = pad_mask.to(device)
-            logits = model(tokens, pad_mask)
-            target = tokens[:, 1:].contiguous()
+            logits = model(input_tensor, pad_mask)
+            target = target_tensor[:, 1:].contiguous()
             logits = logits[:, :-1].contiguous()
             loss = F.cross_entropy(
                 logits.view(-1, logits.size(-1)),
@@ -629,128 +738,117 @@ def calculate_perplexity(model, dataloader, pad_token_id):
 perplexity = calculate_perplexity(model, dataloader, PAD_TOKEN_ID)
 print(f"Final Perplexity: {perplexity:.4f}")
 
-# Evaluation function with top-k sampling
-def generate_response(input_text, model, word_to_id, id_to_word, max_length=20, top_k=10, temperature=0.8, device=None):
-    model.eval()
-    tokens = input_text.lower().split()
-    input_ids = [SOS_TOKEN_ID] + [word_to_id.get(t, EOS_TOKEN_ID) for t in tokens] + [SEP_TOKEN_ID]
+# Evaluation function with top-k sampling and improved handling of repetitions
+def generate_response(model, input_text, vocab_dict, device, max_length=50, temperature=0.8, top_k=40, repetition_penalty=1.2):
+    """
+    Generate a response from the model given input text
     
-    # Pad sequence to be divisible by block_size
-    remainder = len(input_ids) % model.block_size
-    if remainder > 0:
-        pad_len = model.block_size - remainder
-        input_ids.extend([PAD_TOKEN_ID] * pad_len)
-    
-    # Use the provided device or fall back to CPU if there's an issue
-    if device is None:
-        device = torch.device("cpu")
-    
-    try:
-        input_tensor = torch.tensor([input_ids], dtype=torch.long).to(device)
-        pad_mask = torch.zeros_like(input_tensor, dtype=torch.bool).unsqueeze(-1).to(device)
-    except Exception as e:
-        print(f"Error with device {device}, falling back to CPU: {e}")
-        device = torch.device("cpu")
-        input_tensor = torch.tensor([input_ids], dtype=torch.long).to(device)
-        pad_mask = torch.zeros_like(input_tensor, dtype=torch.bool).unsqueeze(-1).to(device)
+    Args:
+        model: The hierarchical transformer model
+        input_text: Text input from user
+        vocab_dict: Dictionary mapping words to ids
+        device: Device to run generation on
+        max_length: Maximum response length
+        temperature: Temperature for sampling (higher = more random)
+        top_k: Number of highest probability tokens to consider for sampling
+        repetition_penalty: Penalty for repeating tokens (higher = less repetition)
         
-    pad_mask[0, :, 0] = (input_tensor[0] == PAD_TOKEN_ID)
-
-    # Initialize output with just [SOS]
-    output_ids = [SOS_TOKEN_ID]
-    input_token_set = set(input_ids)  # Track input tokens to avoid repetition
+    Returns:
+        Generated response text
+    """
+    model.eval()  # Set model to evaluation mode
     
-    # Keep track of n-grams to prevent repetition
-    n_grams = set()
-    n = 3  # Use trigrams
+    # Tokenize the input text
+    input_tokens = []
+    for word in input_text.lower().split():
+        if word in vocab_dict:
+            input_tokens.append(vocab_dict[word])
+        else:
+            input_tokens.append(UNK_TOKEN_ID)  # Use UNK token for unknown words
     
+    # Add SOS token at the beginning
+    input_tokens = [SOS_TOKEN_ID] + input_tokens
+    
+    # Convert to tensor and move to device
+    input_tensor = torch.tensor(input_tokens).unsqueeze(0).to(device)
+    
+    # Create pad mask (no padding in input)
+    pad_mask = torch.ones_like(input_tensor).bool().to(device)
+    
+    # Track generated token ids and scores
+    output_token_ids = []
+    
+    # Track repeating tokens to apply repetition penalty
+    token_counts = {}
+    
+    # Generate response token by token
     with torch.no_grad():
         for _ in range(max_length):
-            # Prepare input for next token prediction
-            current_ids = input_ids + [SEP_TOKEN_ID] + output_ids[1:]  # Include input context
-            remainder = len(current_ids) % model.block_size
-            if remainder > 0:
-                padding_length = model.block_size - remainder
-                current_ids.extend([PAD_TOKEN_ID] * padding_length)
+            # Get model output
+            logits = model(input_tensor, pad_mask)
             
-            try:
-                input_tensor = torch.tensor([current_ids], dtype=torch.long).to(device)
-                pad_mask = torch.zeros_like(input_tensor, dtype=torch.bool).unsqueeze(-1).to(device)
-                pad_mask[0, :, 0] = (input_tensor[0] == PAD_TOKEN_ID)
-                
-                # Get model predictions
-                logits = model(input_tensor, pad_mask)
-                next_token_logits = logits[:, -1, :] / temperature
-            except Exception as e:
-                print(f"Error during generation, falling back to CPU: {e}")
-                device = torch.device("cpu")
-                model = model.to(device)
-                input_tensor = torch.tensor([current_ids], dtype=torch.long).to(device)
-                pad_mask = torch.zeros_like(input_tensor, dtype=torch.bool).unsqueeze(-1).to(device)
-                pad_mask[0, :, 0] = (input_tensor[0] == PAD_TOKEN_ID)
-                
-                # Retry with CPU
-                logits = model(input_tensor, pad_mask)
-                next_token_logits = logits[:, -1, :] / temperature
+            # Consider only the prediction for the last token
+            next_token_logits = logits[0, -1, :].cpu()
             
             # Apply repetition penalty
-            for id_ in set(output_ids):
-                next_token_logits[0, id_] /= 1.2  # Penalize tokens that have been generated
-            for id_ in input_token_set:
-                next_token_logits[0, id_] /= 1.5  # Strongly penalize input tokens
+            for token_id in set(output_token_ids):
+                if token_id in token_counts:
+                    token_counts[token_id] += 1
+                else:
+                    token_counts[token_id] = 1
                 
-            # Filter special tokens except EOS
-            for id_ in [SOS_TOKEN_ID, SEP_TOKEN_ID, PAD_TOKEN_ID]:
-                next_token_logits[0, id_] = float('-inf')
+                # Apply exponential penalty based on frequency
+                penalty = repetition_penalty ** token_counts[token_id]
+                next_token_logits[token_id] /= penalty
             
-            # Check if adding each top-k token would create a repetitive n-gram
-            top_k_logits, top_k_indices = torch.topk(next_token_logits, min(top_k * 2, next_token_logits.size(-1)), dim=-1)
-            valid_indices = []
-            for idx in top_k_indices[0]:
-                idx = idx.item()
-                candidate_token = id_to_word.get(idx, "<UNK>")
+            # Apply temperature
+            next_token_logits = next_token_logits / temperature
+            
+            # Apply top-k filtering
+            if top_k > 0:
+                top_k_values, top_k_indices = torch.topk(next_token_logits, top_k)
                 
-                # Get the last n-1 tokens
-                prev_tokens = [id_to_word.get(tid, "<UNK>") for tid in output_ids[-n+1:]]
-                if len(prev_tokens) < n-1:
-                    valid_indices.append(idx)
-                    continue
-                    
-                # Check if this would create a repetitive n-gram
-                candidate_ngram = " ".join(prev_tokens + [candidate_token])
-                if candidate_ngram not in n_grams:
-                    valid_indices.append(idx)
-                    if len(valid_indices) >= top_k:
-                        break
+                # Create a mask for the top-k tokens
+                next_token_logits.fill_(-float('inf'))
+                next_token_logits.scatter_(0, top_k_indices, top_k_values)
             
-            if not valid_indices:  # If all tokens would create repetitive n-grams, use original top-k
-                valid_indices = top_k_indices[0, :top_k].tolist()
+            # Convert to probabilities
+            probs = F.softmax(next_token_logits, dim=0)
             
-            # Sample from valid tokens
-            valid_logits = next_token_logits[0, valid_indices]
-            probs = F.softmax(valid_logits, dim=-1)
-            next_token_id = valid_indices[torch.multinomial(probs, 1).item()]
+            # Sample from the distribution
+            next_token = torch.multinomial(probs, 1).item()
             
-            output_ids.append(next_token_id)
-            
-            # Update n-grams
-            if len(output_ids) >= n:
-                current_tokens = [id_to_word.get(tid, "<UNK>") for tid in output_ids[-n:]]
-                n_grams.add(" ".join(current_tokens))
-            
-            if next_token_id == EOS_TOKEN_ID:
+            # Break if we generate the SEP or END token
+            if next_token == SEP_TOKEN_ID or next_token == EOS_TOKEN_ID:
                 break
+                
+            # Add the generated token to our output
+            output_token_ids.append(next_token)
+            
+            # Append the next token to the input for the next iteration
+            next_token_tensor = torch.tensor([[next_token]]).to(device)
+            input_tensor = torch.cat([input_tensor, next_token_tensor], dim=1)
+            
+            # Update pad mask
+            pad_mask = torch.cat([pad_mask, torch.ones_like(next_token_tensor).bool().to(device)], dim=1)
     
-    # Convert tokens to words, skipping special tokens
-    output_tokens = []
-    for token_id in output_ids:
-        if token_id == EOS_TOKEN_ID:
-            break
-        if token_id not in [SOS_TOKEN_ID, SEP_TOKEN_ID, PAD_TOKEN_ID]:
-            output_tokens.append(id_to_word[token_id])
+    # Convert token ids back to words
+    output_words = []
+    for token_id in output_token_ids:
+        if token_id in id_to_word:
+            output_words.append(id_to_word[token_id])
+        else:
+            output_words.append("<UNK>")  # Should not happen, but just in case
     
-    response = " ".join(output_tokens)
-    return response if response.strip() else "I am doing well, thank you! How can I help you today?"
+    # Basic coherence check - at least 3 unique words and no excessive repetition
+    unique_words = set(output_words)
+    if len(unique_words) < 3 or any(output_words.count(word) > len(output_words) // 3 for word in unique_words):
+        return "I'm not sure how to respond to that. Could you rephrase your question?"
+    
+    # Join the words to create the response text
+    response_text = " ".join(output_words)
+    
+    return response_text
 
 test_inputs = [
     "hello how are you",
@@ -760,7 +858,7 @@ test_inputs = [
 ]
 
 for input_text in test_inputs:
-    response = generate_response(input_text, model, word_to_id, id_to_word)
+    response = generate_response(model, input_text, word_to_id, device)
     print(f"User Input: {input_text}")
     print(f"Model Response: {response}")
     print("---")

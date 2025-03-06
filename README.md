@@ -122,6 +122,35 @@ python3 chat_app.py --checkpoint checkpoints/best_model.pt --interface web
 python3 chat_app.py --checkpoint checkpoints/best_model.pt --interface cli
 ```
 
+## Usage
+
+### Training the Model
+
+The recommended way to train the model is using the enhanced training script:
+
+```bash
+python3 enhanced_training.py --epochs 50 --batch_size 32 --templates 1000 --learning_rate 0.001
+```
+
+Key parameters:
+- `--epochs`: Number of training epochs
+- `--batch_size`: Batch size for training
+- `--templates`: Number of synthetic conversation templates to generate
+- `--learning_rate`: Learning rate for the optimizer
+- `--regenerate_data`: Force regeneration of training data
+
+The hierarchical transformer script will automatically forward to the enhanced training script when run directly.
+
+### Using the Chat Interface
+
+To interact with the trained model:
+
+```bash
+python3 chat_app.py
+```
+
+This will start a Gradio web interface that allows you to chat with the model.
+
 ## Project Structure
 
 - `hiearchal_transformer.py`: Core model implementation

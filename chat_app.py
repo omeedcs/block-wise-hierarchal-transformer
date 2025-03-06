@@ -43,51 +43,57 @@ def load_model(checkpoint_path=None):
     Returns:
         Loaded or initialized model
     """
-    # Create model
+    # Create model - use parameters matching our training
     model = HierarchicalTransformer(
         vocab_size=len(word_to_id),
-        d_model=128,
-        d_ff=512,
-        n_heads=4,
-        n_local_layers=2,
-        n_global_layers=2,
-        block_size=8
+        d_model=256,
+        d_ff=1024,
+        n_heads=8,
+        block_size=8,
+        n_local_layers=3,
+        n_global_layers=2
     )
     
-    # Determine device
-    if torch.cuda.is_available():
-        device = torch.device("cuda")
-        print(f"Using CUDA device: {torch.cuda.get_device_name(0)}")
-    elif torch.backends.mps.is_available():
-        device = torch.device("mps")
-        print("Using MPS (Apple Silicon) device")
-    else:
-        device = torch.device("cpu")
-        print("Using CPU for inference")
-    
-    # Load checkpoint if provided
+    # Check if a checkpoint path is provided
     if checkpoint_path and os.path.exists(checkpoint_path):
         try:
-            print(f"Loading model from checkpoint: {checkpoint_path}")
-            checkpoint = torch.load(checkpoint_path, map_location=device)
-            
-            if 'model_state_dict' in checkpoint:
-                model.load_state_dict(checkpoint['model_state_dict'])
-                # Extract additional info if available
-                epoch = checkpoint.get('epoch', 0)
-                loss = checkpoint.get('loss', float('inf'))
-                perplexity = checkpoint.get('perplexity', float('inf'))
-                print(f"Model loaded from epoch {epoch} with loss {loss:.4f} and perplexity {perplexity:.4f}")
+            # Determine device
+            if torch.cuda.is_available():
+                device = torch.device("cuda")
+            elif torch.backends.mps.is_available():
+                device = torch.device("mps")
             else:
-                model.load_state_dict(checkpoint)
-                print("Model loaded successfully")
+                device = torch.device("cpu")
                 
+            # Load the checkpoint
+            state_dict = torch.load(checkpoint_path, map_location=device)
+            model.load_state_dict(state_dict)
+            print(f"Model loaded from {checkpoint_path}")
         except Exception as e:
-            print(f"Error loading checkpoint: {e}")
+            print(f"Failed to load model from {checkpoint_path}: {e}")
             print("Initializing new model instead")
     else:
-        print("No checkpoint provided or file not found.")
-        print("Initializing new model")
+        # Look for default model location
+        default_path = "hierarchical_transformer_enhanced.pth"
+        if os.path.exists(default_path):
+            try:
+                # Determine device
+                if torch.cuda.is_available():
+                    device = torch.device("cuda")
+                elif torch.backends.mps.is_available():
+                    device = torch.device("mps")
+                else:
+                    device = torch.device("cpu")
+                    
+                # Load the checkpoint
+                state_dict = torch.load(default_path, map_location=device)
+                model.load_state_dict(state_dict)
+                print(f"Model loaded from {default_path}")
+            except Exception as e:
+                print(f"Failed to load model: {e}")
+                print("Initializing new model instead")
+        else:
+            print("No model checkpoint found. Initializing new model.")
     
     model = model.to(device)
     model.eval()  # Set to evaluation mode
@@ -102,68 +108,57 @@ def create_web_interface(model, device):
         model: The transformer model to use
         device: Device to run inference on
     """
-    try:
-        import gradio as gr
+    conversation_history = []
+    
+    def respond(message, history):
+        # Add the user message to our conversation history
+        conversation_history.append(f"User: {message}")
         
-        # Define conversation response function
-        def respond(message, chat_history, temperature=0.8, max_length=20, top_k=10):
-            # Input validation
-            if not message:
-                return chat_history
-            
-            # Generate response
-            temperature = float(temperature)
-            max_length = int(max_length)
-            top_k = int(top_k)
-            
-            start_time = time.time()
+        # Start time for response generation
+        start_time = time.time()
+        
+        # Generate response using our model
+        try:
             response = generate_response(
-                message, model, word_to_id, id_to_word,
-                max_length=max_length, top_k=top_k, temperature=temperature,
-                device=device
+                model, 
+                message, 
+                word_to_id, 
+                device, 
+                max_length=50, 
+                temperature=0.8, 
+                top_k=40,
+                repetition_penalty=1.2
             )
+            
+            # Calculate the time taken to generate response
             end_time = time.time()
+            generation_time = end_time - start_time
+            print(f"Generated response in {generation_time:.3f} seconds")
             
-            # Log timing information
-            print(f"Generated response in {(end_time - start_time):.3f} seconds")
-            print(f"User: {message}")
-            print(f"Bot: {response}")
+            # Add the response to our conversation history
+            conversation_history.append(f"Bot: {response}")
             
-            # Format for Gradio chatbot (list of [user_msg, bot_response] pairs)
-            chat_history.append((message, response))
-            return chat_history
-        
-        # Create interface
-        with gr.Blocks(title="Hierarchical Transformer Chatbot") as interface:
-            gr.Markdown("# Hierarchical Transformer Chatbot")
-            gr.Markdown("This chatbot uses a block-wise hierarchical transformer architecture to generate conversations.")
-            
-            with gr.Row():
-                with gr.Column(scale=4):
-                    chatbot = gr.Chatbot(height=400)
-                    msg = gr.Textbox(placeholder="Type your message here...", show_label=False)
-                    with gr.Row():
-                        submit = gr.Button("Send")
-                        clear = gr.Button("Clear")
-                
-                with gr.Column(scale=1):
-                    gr.Markdown("## Parameters")
-                    temperature = gr.Slider(0.1, 2.0, 0.8, step=0.1, label="Temperature")
-                    max_length = gr.Slider(10, 100, 50, step=1, label="Max Length")
-                    top_k = gr.Slider(0, 50, 10, step=1, label="Top K")
-            
-            # Set up event handlers
-            msg.submit(respond, [msg, chatbot, temperature, max_length, top_k], [chatbot], queue=True)
-            submit.click(respond, [msg, chatbot, temperature, max_length, top_k], [chatbot], queue=True)
-            clear.click(lambda: [], None, chatbot, queue=False)
-            
-        # Launch interface
-        interface.launch(share=True)
-        
-    except ImportError:
-        print("Gradio is not installed. Please install it with: pip install gradio")
-        print("Falling back to command-line interface")
-        create_cli_interface(model, device)
+            return response
+        except Exception as e:
+            print(f"Error generating response: {e}")
+            return "I'm having trouble processing that. Could you try again?"
+    
+    # Create the Gradio interface
+    gr.ChatInterface(
+        respond,
+        chatbot=gr.Chatbot(height=500),
+        title="Hierarchical Transformer Chatbot",
+        description="A block-wise hierarchical transformer chatbot",
+        theme="default",
+        examples=[
+            "Hello, how are you?",
+            "What's your name?",
+            "Tell me about yourself",
+            "What can you do?",
+            "Thank you for your help"
+        ],
+        cache_examples=False
+    ).launch(share=True)
 
 def create_cli_interface(model, device):
     """
