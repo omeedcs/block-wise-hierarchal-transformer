@@ -419,7 +419,7 @@ device = torch.device("cpu")
 
 # Vocabulary and special tokens
 PAD_TOKEN = "<PAD>"
-SOS_TOKEN = "<SOS>"
+SOS_TOKEN = ""
 EOS_TOKEN = "<EOS>"
 SEP_TOKEN = "<SEP>"
 vocab = [

@@ -1,52 +1,145 @@
-# Hierarchical Transformer: A Block-wise Approach to Sequence Modeling
+# Hierarchical Transformer Chatbot
 
-This repository contains an implementation of a Hierarchical Transformer model that processes sequences in a block-wise manner. The model is inspired by research on hierarchical attention mechanisms and long-sequence modeling techniques, combining elements from papers such as "Hierarchical Transformers for Long Document Classification" and "Longformer: The Long-Document Transformer."
+This project implements a block-wise hierarchical transformer model for natural language generation and conversation. The architecture processes text in blocks with local and global attention mechanisms for improved efficiency.
 
-## Model Architecture & Innovation
+## Project Architecture
 
-### Hierarchical Processing
-The model introduces a two-level hierarchical structure:
-1. **Local Processing**: First-level processing within fixed-size blocks (default: 8 tokens)
-2. **Global Processing**: Second-level processing that operates on block-level representations
+The hierarchical transformer uses a novel block-wise approach:
+1. Text is divided into fixed-size blocks
+2. Local transformer layers process each block independently
+3. Global transformer layers integrate information across blocks
+4. This design balances computational efficiency with modeling long-range dependencies
 
-This approach reduces the quadratic attention complexity inherent in standard transformers and enables more efficient processing of longer sequences.
+## Key Features
 
-### Key Components
+### Model Architecture
+- Block-wise hierarchical transformer
+- Configurable model dimensions (d_model, d_ff)
+- Adjustable attention heads
+- Separate local and global transformer layers
+- Customizable block size
 
-#### 1. `HierarchicalTransformer` Class
-The main model class that orchestrates:
-- Token embeddings and positional encoding
-- Local processing of token blocks
-- Pooling of block representations
-- Global processing across blocks
-- Final output projection
+### Training System
+- Enhanced training with checkpointing
+- Learning rate scheduling
+- Progress tracking and visualization
+- Automatic device selection (CUDA/MPS/CPU)
+- Comprehensive metrics collection
 
-#### 2. `FullAttention` Class
-- Implements scaled dot-product attention with numerical stability enhancements
-- Uses optimized softmax computation in log-space
-- Includes gradient clipping for training stability
-- Compatible with various hardware backends including Apple MPS
+### Data Processing
+- Multiple data source support (JSON, CSV, TXT)
+- Web API integration capabilities
+- Synthetic conversation generation
+- Template-based conversations
+- Robust data cleaning and normalization
 
-#### 3. `AttentionLayer` Class 
-- Encapsulates multi-head attention
-- Projects inputs into queries, keys, and values
-- Supports different dimensions for queries, keys, and values
-- Includes layer normalization for each projection
+### Inference and Evaluation
+- Command-line and web interfaces
+- Perplexity evaluation
+- Response diversity metrics
+- Automated conversation testing
+- Training curve visualization
 
-#### 4. `TransformerLayer` Class
-- Combines attention and feed-forward networks
-- Uses residual connections and layer normalization
-- Configurable number of attention heads and feed-forward dimensions
+### Hardware Support
+- CUDA GPU acceleration
+- Apple Silicon (MPS) optimization
+- CPU fallback with automatic detection
 
-#### 5. `PoolingLayer` Class
-- Specialized attention-based pooling for block summarization
-- Uses a learnable query parameter to extract relevant information
-- Crucial for the transition between local and global processing levels
+## Getting Started
 
-#### 6. `FeedForward` Class
-- Implements a position-wise feed-forward network with GELU activation
-- Uses two linear transformations with a non-linearity in between
-- Includes dropout and layer normalization
+### Prerequisites
+- Python 3.8+
+- PyTorch 1.12+
+- Gradio (for web interface)
+- Additional requirements in `requirements.txt`
+
+### Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/hierarchical-transformer-chatbot.git
+cd hierarchical-transformer-chatbot
+
+# Install dependencies
+pip install -r requirements.txt
+```
+
+### Training
+
+Train the model using the enhanced training script:
+
+```bash
+python3 enhanced_training.py --templates_count 5000 --epochs 20 --batch_size 32
+```
+
+Key parameters:
+- `--templates_count`: Number of synthetic conversations to generate
+- `--epochs`: Number of training epochs
+- `--batch_size`: Batch size for training
+- `--learning_rate`: Learning rate for optimizer
+- `--d_model`: Dimension of the model
+- `--n_heads`: Number of attention heads
+- See `enhanced_training.py` for all options
+
+### Evaluation
+
+Evaluate model performance with various metrics:
+
+```bash
+python3 evaluate_model.py --model_path checkpoints/best_model.pt --eval_mode all
+```
+
+Evaluation modes:
+- `perplexity`: Calculate perplexity on test data
+- `diversity`: Measure response diversity
+- `interactive`: Chat interactively with the model
+- `auto_convo`: Run automated conversations
+- `all`: Run all evaluations
+
+### Visualization
+
+Visualize training results and model performance:
+
+```bash
+python3 visualize_results.py --checkpoint_dir checkpoints --output_dir visualizations
+```
+
+This generates:
+- Training loss and perplexity curves
+- Attention pattern visualizations
+- Token distribution analysis
+- Model comparison metrics
+
+### Chat Interface
+
+Run the chatbot with an interactive interface:
+
+```bash
+# Web interface (requires Gradio)
+python3 chat_app.py --checkpoint checkpoints/best_model.pt --interface web
+
+# Command-line interface
+python3 chat_app.py --checkpoint checkpoints/best_model.pt --interface cli
+```
+
+## Project Structure
+
+- `hiearchal_transformer.py`: Core model implementation
+- `data_loader.py`: Data loading and processing utilities
+- `enhanced_training.py`: Advanced training script with metrics tracking
+- `evaluate_model.py`: Model evaluation tools
+- `visualize_results.py`: Visualization utilities for training results
+- `chat_app.py`: Interactive chat interfaces (CLI and web)
+- `test_chat.py`: Testing script for the chat server
+- `checkpoints/`: Directory for model checkpoints
+- `visualizations/`: Directory for generated visualizations
+
+## Acknowledgements
+
+This project draws inspiration from:
+- The transformer architecture proposed by Vaswani et al. in "Attention Is All You Need"
+- Hierarchical attention mechanisms for efficient NLP processing
+- Advances in conversational AI and neural dialogue systems
 
 ## Technical Details
 
@@ -109,45 +202,6 @@ The code automatically selects the best available device in this order:
 2. Apple Silicon MPS (if available, with CPU fallback for problematic operations)
 3. CPU (as the universal fallback)
 
-## Implementation Details
-
-### Data Preprocessing
-- Conversations are tokenized and formatted with special tokens (`SOS`, `EOS`, `SEP`)
-- Sequences are padded to ensure divisibility by block size
-- Masks are created to handle padded tokens appropriately
-
-### Training Process
-- Uses cross-entropy loss with padding token ignored
-- Employs the Adam optimizer with learning rate 5e-4
-- Includes gradient clipping to prevent exploding gradients
-- Trains for multiple epochs with batch size 8
-
-### Inference
-- Uses top-k sampling with adjustable temperature
-- Generates responses token-by-token in an autoregressive manner
-- Handles block-wise processing during generation
-
-## Usage Guide
-
-### Requirements
-- Python 3.6+
-- PyTorch 1.7+
-- Math, Torch, and other standard libraries
-
-### Training
-```bash
-python hiearchal_transformer.py
-```
-The script will train the model on a small dataset of conversations and evaluate its performance.
-
-### Hyperparameters
-Key hyperparameters include:
-- `block_size`: Size of local processing blocks (default: 8)
-- `d_model`: Model dimension (default: 128)
-- `n_heads`: Number of attention heads (default: 4)
-- `n_local_layers`: Number of local transformer layers (default: 2)
-- `n_global_layers`: Number of global transformer layers (default: 2)
-
 ## Potential Applications
 
 This hierarchical transformer can be adapted for various NLP tasks:
@@ -171,13 +225,6 @@ Current limitations to be aware of:
 - Block boundaries may not align with natural language segments
 - May lose fine-grained token relationships during pooling
 - Currently implemented for a small-scale demonstration
-
-## Acknowledgments
-
-This implementation draws inspiration from:
-- The original Transformer paper (Vaswani et al., 2017)
-- Research on hierarchical attention networks
-- The PyTorch library and community
 
 ## References
 
